@@ -7,10 +7,68 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const mysql = require('mysql');
 require('dotenv').config();
+const fileUpload = require('express-fileupload');
 
-
+// Create Express app
 const app = express();
 const port = 3001;
+
+// Middleware
+app.use(cors());
+app.use(bodyParser.json());
+app.use(fileUpload());
+
+// MySQL connection
+const db = mysql.createConnection({
+  host: 'localhost',
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: 'Gaming_website',
+});
+
+
+// POST endpoint to handle studio data insertion
+app.post('/entity', (req, res) => {
+  const { type, name, location, email, address, aboutUs, website, agreeTerms, confirmOwner } = req.body;
+  const logo = req.files ? req.files.logo.data : null; // Get logo data from files
+  const coverArt = req.files ? req.files.coverArt.data : null; // Get coverArt data from files
+  const agreeTermsInt = agreeTerms ? 1 : 0; // Convert boolean to integer
+  const confirmOwnerInt = confirmOwner ? 1 : 0; // Convert boolean to integer
+
+  // Determine the table name based on the type
+  const tableName = type === 'studio' ? 'Studios' : 'Organizations';
+
+  const sql = `INSERT INTO ${tableName} (name, location, email, address, aboutUs, website, logo, coverArt, agreeTerms, confirmOwner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  const values = [name, location, email, address, aboutUs, website, logo, coverArt, agreeTermsInt, confirmOwnerInt];
+
+  db.query(sql, values, (err, result) => {
+    if (err) {
+      console.error('Error inserting entity data:', err);
+      res.status(500).send({ message: 'Error inserting entity data' });
+    } else {
+      console.log('Entity data inserted successfully');
+      res.status(201).send({ message: 'Entity data inserted successfully' });
+    }
+  });
+});
+
+
+app.get('/entities', (req, res) => {
+  const sql = `SELECT name, logo FROM Studios`;
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('Error retrieving entities:', err);
+      res.status(500).send({ message: 'Error retrieving entities' });
+    } else {
+      res.status(200).send(results);
+    }
+  });
+});
+
+
+
+
 app.use(cors({
   origin: 'http://localhost:3000', // Allow requests from your React app
   
@@ -20,12 +78,7 @@ app.use(cors({
 
 
 
-const db = mysql.createConnection({
-  host: 'localhost',
-  user: process.env.DB_USER, 
-  password: process.env.DB_PASSWORD,
-  database: 'Gaming_website'
-});
+
 
 
 db.connect((err) => {
