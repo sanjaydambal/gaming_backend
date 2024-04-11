@@ -82,7 +82,7 @@ app.get('/entities', (req, res) => {
 
 
 app.use(cors({
-  origin: 'http://localhost:3000', // Allow requests from your React app
+  origin: 'https://gaming-website-fe.onrender.com', // Allow requests from your React app
   
 }));
 
