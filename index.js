@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
-const mysql = require('mysql');
+const { Pool } = require('pg');
 require('dotenv').config();
 const fileUpload = require('express-fileupload');
 
@@ -18,15 +18,27 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(fileUpload());
 
-// MySQL connection
-const db = mysql.createConnection({
-  host: 'localhost',
+// PostgreSQL connection
+const pool = new Pool({
   user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
   password: process.env.DB_PASSWORD,
-  database: 'Gaming_website',
+  port: 5432, // Default PostgreSQL port
+  ssl: {
+      rejectUnauthorized: false, // Set to false if using self-signed certificates
+      // You may need to provide other SSL options such as ca, cert, and key
+      // Example:
+      // ca: fs.readFileSync('path/to/ca-certificate.crt'),
+      // cert: fs.readFileSync('path/to/client-certificate.crt'),
+      // key: fs.readFileSync('path/to/client-certificate.key')
+  },
 });
 
-
+pool.on('error', (err, client) => {
+  console.error('Unexpected error on idle client', err);
+  process.exit(-1);
+});
 // POST endpoint to handle studio data insertion
 app.post('/entity', (req, res) => {
   const { type, name, location, email, address, aboutUs, website, agreeTerms, confirmOwner } = req.body;
@@ -41,7 +53,7 @@ app.post('/entity', (req, res) => {
   const sql = `INSERT INTO ${tableName} (name, location, email, address, aboutUs, website, logo, coverArt, agreeTerms, confirmOwner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   const values = [name, location, email, address, aboutUs, website, logo, coverArt, agreeTermsInt, confirmOwnerInt];
 
-  db.query(sql, values, (err, result) => {
+  pool.query(sql, values, (err, result) => {
     if (err) {
       console.error('Error inserting entity data:', err);
       res.status(500).send({ message: 'Error inserting entity data' });
@@ -56,7 +68,7 @@ app.post('/entity', (req, res) => {
 app.get('/entities', (req, res) => {
   const sql = `SELECT name, logo FROM Studios`;
 
-  db.query(sql, (err, results) => {
+  pool.query(sql, (err, results) => {
     if (err) {
       console.error('Error retrieving entities:', err);
       res.status(500).send({ message: 'Error retrieving entities' });
@@ -81,12 +93,14 @@ app.use(cors({
 
 
 
-db.connect((err) => {
+pool.connect((err) => {
   if (err) {
     throw err;
   }
   console.log('Connected to the database');
 });
+
+
 
 
 app.use(cors());
@@ -104,13 +118,16 @@ app.post('/register', (req, res) => {
     }
 
     // Insert user into the database with hashed password
-    const sql = 'INSERT INTO Users (email, password) VALUES (?, ?)';
-    db.query(sql, [email, hashedPassword], (err, result) => {
+    const sql = 'INSERT INTO members (email, password) VALUES ($1, $2)';
+
+    pool.query(sql, [email, hashedPassword], (err, result) => {
       if (err) {
+        console.error('Error registering user:', err.message); // Log the error message
         res.status(500).send({ message: 'Error registering user' });
       } else {
         res.status(201).send({ message: 'User registered successfully' });
       }
+      
     });
   });
 });
@@ -118,15 +135,15 @@ app.post('/register', (req, res) => {
 app.post('/login', (req, res) => {
   const { email, password } = req.body;
 
-  const sql = 'SELECT * FROM Users WHERE email = ?';
-  db.query(sql, [email], (err, results) => {
+  const sql = 'SELECT * FROM members WHERE email = $1';
+  pool.query(sql, [email], (err, results) => {
     if (err) {
       res.status(500).send({ message: 'Error retrieving user' });
     } else {
-      if (results.length === 0) {
+      if (results.rows.length === 0) {
         res.status(404).send({ message: 'User not found' });
       } else {
-        const user = results[0];
+        const user = results.rows[0];
 
         bcrypt.compare(password, user.password, (err, result) => {
           if (err) {
@@ -134,7 +151,7 @@ app.post('/login', (req, res) => {
           } else {
             if (result) {
               // Generate JWT
-              const token = jwt.sign({ email: user.email }, process.env.JWT_SECRET,{
+              const token = jwt.sign({ email: user.email }, process.env.JWT_SECRET, {
                 expiresIn: '1h'
               });
               res.status(200).send({ message: 'Login successful', token });
@@ -147,6 +164,7 @@ app.post('/login', (req, res) => {
     }
   });
 });
+
 
 // Middleware to verify JWT
 const verifyToken = (req, res, next) => {
@@ -165,6 +183,7 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
+
 
 
 
@@ -210,9 +229,9 @@ app.post('/news', (req, res) => {
   const sql = `INSERT INTO news 
     (title, subtitle, short_description, long_description, header_img, thumbnail_img, 
     scheduled_date, is_live, is_scheduled, is_trashed, slug, keywords, tags, created_by, category_uid) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`;
 
-  db.query(
+  pool.query(
     sql,
     [
       title,
@@ -233,19 +252,22 @@ app.post('/news', (req, res) => {
     ],
     (err, result) => {
       if (err) {
+        console.error('Error posting news:', err);
         res.status(500).send({ message: 'Error posting news' });
       } else {
+        console.log('News posted successfully');
         res.status(201).send({ message: 'News posted successfully' });
       }
     }
   );
 });
 
+
 app.get('/news', (req, res) => {
   const sql = 'SELECT * FROM news';
   console.log(req.session)
 
-  db.query(sql, (err, results) => {
+  pool.query(sql, (err, results) => {
     if (err) {
       res.status(500).send({ message: 'Error retrieving news' });
     } else {
@@ -254,23 +276,24 @@ app.get('/news', (req, res) => {
   }
   )})
 
-app.get('/news/:id',verifyToken, (req, res) => {
-  const newsId = req.params.id;
-  const sql = 'SELECT * FROM news WHERE news_id = ?';
-
-  db.query(sql, [newsId], (err, results) => {
-    if (err) {
-      console.error('Error retrieving news:', err);
-      res.status(500).send({ message: 'Error retrieving news' });
-    } else {
-      if (results.length > 0) {
-        res.status(200).send(results[0]);
+  app.get('/news/:id', verifyToken, (req, res) => {
+    const newsId = req.params.id;
+    const sql = 'SELECT * FROM news WHERE news_id = $1'; // Using parameterized query to prevent SQL injection
+  
+    pool.query(sql, [newsId], (err, results) => {
+      if (err) {
+        console.error('Error retrieving news:', err);
+        res.status(500).send({ message: 'Error retrieving news' });
       } else {
-        res.status(404).send({ message: 'News not found' });
+        if (results.rows.length > 0) { // Access rows property in PostgreSQL result object
+          res.status(200).send(results.rows[0]); // Access rows property to get the array of rows
+        } else {
+          res.status(404).send({ message: 'News not found' });
+        }
       }
-    }
+    });
   });
-});
+  
 
 
 app.listen(port, () => {
