@@ -271,7 +271,7 @@ app.get('/news', (req, res) => {
     if (err) {
       res.status(500).send({ message: 'Error retrieving news' });
     } else {
-      res.status(200).send(results);
+      res.status(200).send(results.rows);
     }
   }
   )})
